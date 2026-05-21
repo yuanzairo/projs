@@ -350,7 +350,7 @@ class App(tk.Tk):
         W = self.canvas.winfo_width()  or 560
         H = self.canvas.winfo_height() or 200
 
-        pad_l, pad_r, pad_t, pad_b = 50, 20, 20, 40
+        pad_l, pad_r, pad_t, pad_b = 50, 20, 20, 60
         plot_w = W - pad_l - pad_r
         plot_h = H - pad_t - pad_b
 
@@ -400,15 +400,37 @@ class App(tk.Tk):
                                     font=("Courier New", 11), fill=SUBTEXT)
 
         # Legend
-        lx = W - pad_r - 140
-        self.canvas.create_rectangle(lx, pad_t, lx+12, pad_t+12,
-                                     fill=ACCENT1, outline="")
-        self.canvas.create_text(lx+16, pad_t+6, text="HMS",
-                                anchor="w", font=("Courier New", 10), fill=ACCENT1)
-        self.canvas.create_rectangle(lx, pad_t+20, lx+12, pad_t+32,
-                                     fill=ACCENT2, outline="")
-        self.canvas.create_text(lx+16, pad_t+26, text="HMS-OS",
-                                anchor="w", font=("Courier New", 10), fill=ACCENT2)
+               # Bottom centered legend
+        legend_y = H - 12
+        center_x = W / 2
+
+        # HMS
+        self.canvas.create_rectangle(
+            center_x - 90, legend_y - 6,
+            center_x - 78, legend_y + 6,
+            fill=ACCENT1, outline=""
+        )
+        self.canvas.create_text(
+            center_x - 72, legend_y,
+            text="HMS",
+            anchor="w",
+            font=("Courier New", 10),
+            fill=ACCENT1
+        )
+
+        # HMS-OS
+        self.canvas.create_rectangle(
+            center_x + 10, legend_y - 6,
+            center_x + 22, legend_y + 6,
+            fill=ACCENT2, outline=""
+        )
+        self.canvas.create_text(
+            center_x + 28, legend_y,
+            text="HMS-OS",
+            anchor="w",
+            font=("Courier New", 10),
+            fill=ACCENT2
+        )
 
 
 if __name__ == "__main__":
