@@ -131,9 +131,16 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("HMS vs HMS-OS")
-        self.geometry("820x620")
-        self.resizable(False, False)
         self.configure(bg=BG)
+        # Start maximized / fullscreen
+        try:
+            self.state("zoomed")          # Windows / some Linux WMs
+        except tk.TclError:
+            try:
+                self.attributes("-zoomed", True)   # Linux (most WMs)
+            except tk.TclError:
+                self.attributes("-fullscreen", True)  # macOS fallback
+        self.resizable(True, True)
         self._build_ui()
 
     # ── UI Construction ────────────────────────────────────────────────────────
@@ -141,28 +148,28 @@ class App(tk.Tk):
     def _build_ui(self):
         # Title bar
         title_fr = tk.Frame(self, bg=BG)
-        title_fr.pack(fill="x", padx=24, pady=(20, 4))
-        tk.Label(title_fr, text="HMS vs HMS-OS", font=("Courier New", 20, "bold"),
+        title_fr.pack(fill="x", padx=40, pady=(28, 6))
+        tk.Label(title_fr, text="HMS vs HMS-OS", font=("Courier New", 28, "bold"),
                  fg=TEXT, bg=BG).pack(side="left")
 
         tk.Label(self, text="Human Mental Search  ·  Dual Clustering Variant",
-                 font=("Courier New", 9), fg=SUBTEXT, bg=BG).pack(anchor="w", padx=26)
+                 font=("Courier New", 12), fg=SUBTEXT, bg=BG).pack(anchor="w", padx=44)
 
         sep = tk.Frame(self, bg=BORDER, height=1)
-        sep.pack(fill="x", padx=24, pady=(10, 0))
+        sep.pack(fill="x", padx=40, pady=(14, 0))
 
         # Body frame
         body = tk.Frame(self, bg=BG)
-        body.pack(fill="both", expand=True, padx=24, pady=12)
+        body.pack(fill="both", expand=True, padx=40, pady=18)
 
         # Left: parameters
         left = tk.Frame(body, bg=PANEL, bd=0, relief="flat",
                         highlightthickness=1, highlightbackground=BORDER)
-        left.pack(side="left", fill="y", ipadx=14, ipady=14, padx=(0, 10))
+        left.pack(side="left", fill="y", ipadx=20, ipady=20, padx=(0, 16))
 
-        tk.Label(left, text="PARAMETERS", font=("Courier New", 9, "bold"),
-                 fg=ACCENT1, bg=PANEL).grid(row=0, column=0, columnspan=2,
-                                            sticky="w", padx=14, pady=(10, 8))
+        tk.Label(left, text="PARAMETERS", font=("Courier New", 12, "bold"),
+                 fg=ACCENT1, bg=PANEL).grid(row=0, column=0, columnspan=3,
+                                            sticky="w", padx=20, pady=(16, 12))
 
         params = [
             ("Solutions  (N)", "50", "10–200"),
@@ -173,30 +180,30 @@ class App(tk.Tk):
         ]
         self.entries = []
         for r, (lbl, default, hint) in enumerate(params, start=1):
-            tk.Label(left, text=lbl, font=("Courier New", 9), fg=TEXT, bg=PANEL,
-                     anchor="w").grid(row=r, column=0, sticky="w", padx=14, pady=5)
-            e = tk.Entry(left, width=6, font=("Courier New", 10), bg=ENTRY_BG,
+            tk.Label(left, text=lbl, font=("Courier New", 12), fg=TEXT, bg=PANEL,
+                     anchor="w").grid(row=r, column=0, sticky="w", padx=20, pady=8)
+            e = tk.Entry(left, width=7, font=("Courier New", 13), bg=ENTRY_BG,
                          fg=TEXT, insertbackground=TEXT, relief="flat",
                          highlightthickness=1, highlightcolor=ACCENT1,
                          highlightbackground=BORDER)
             e.insert(0, default)
-            e.grid(row=r, column=1, padx=(4, 14), pady=5, sticky="w")
-            tk.Label(left, text=hint, font=("Courier New", 7), fg=SUBTEXT,
-                     bg=PANEL).grid(row=r, column=2, padx=(0, 10), sticky="w")
+            e.grid(row=r, column=1, padx=(6, 16), pady=8, sticky="w")
+            tk.Label(left, text=hint, font=("Courier New", 9), fg=SUBTEXT,
+                     bg=PANEL).grid(row=r, column=2, padx=(0, 16), sticky="w")
             self.entries.append(e)
 
         # Run button
         self.run_btn = tk.Button(
-            left, text="▶  RUN", font=("Courier New", 10, "bold"),
+            left, text="▶  RUN", font=("Courier New", 13, "bold"),
             bg=ACCENT1, fg="#fff", activebackground="#3a6fd4",
-            relief="flat", cursor="hand2", padx=20, pady=6,
+            relief="flat", cursor="hand2", padx=24, pady=10,
             command=self._start_run)
         self.run_btn.grid(row=len(params)+1, column=0, columnspan=3,
-                          padx=14, pady=(16, 6), sticky="ew")
+                          padx=20, pady=(22, 8), sticky="ew")
 
-        self.status_lbl = tk.Label(left, text="", font=("Courier New", 8),
+        self.status_lbl = tk.Label(left, text="", font=("Courier New", 10),
                                    fg=SUBTEXT, bg=PANEL)
-        self.status_lbl.grid(row=len(params)+2, column=0, columnspan=3, padx=14)
+        self.status_lbl.grid(row=len(params)+2, column=0, columnspan=3, padx=20)
 
         # Right: results
         right = tk.Frame(body, bg=BG)
@@ -214,23 +221,23 @@ class App(tk.Tk):
         for col, metric in enumerate(metrics):
             card = tk.Frame(cards_fr, bg=PANEL, highlightthickness=1,
                             highlightbackground=BORDER)
-            card.grid(row=0, column=col, padx=4, pady=4, sticky="nsew", ipadx=8, ipady=8)
+            card.grid(row=0, column=col, padx=6, pady=6, sticky="nsew", ipadx=14, ipady=14)
             cards_fr.columnconfigure(col, weight=1)
 
-            tk.Label(card, text=metric, font=("Courier New", 7), fg=SUBTEXT,
-                     bg=PANEL, wraplength=120, justify="center").pack(pady=(8, 4))
+            tk.Label(card, text=metric, font=("Courier New", 10), fg=SUBTEXT,
+                     bg=PANEL, wraplength=160, justify="center").pack(pady=(12, 6))
 
-            h_lbl = tk.Label(card, text="—", font=("Courier New", 13, "bold"),
+            h_lbl = tk.Label(card, text="—", font=("Courier New", 18, "bold"),
                              fg=ACCENT1, bg=PANEL)
             h_lbl.pack()
-            tk.Label(card, text="HMS", font=("Courier New", 7), fg=ACCENT1,
+            tk.Label(card, text="HMS", font=("Courier New", 10), fg=ACCENT1,
                      bg=PANEL).pack()
 
-            o_lbl = tk.Label(card, text="—", font=("Courier New", 13, "bold"),
+            o_lbl = tk.Label(card, text="—", font=("Courier New", 18, "bold"),
                              fg=ACCENT2, bg=PANEL)
-            o_lbl.pack(pady=(6, 0))
-            tk.Label(card, text="HMS-OS", font=("Courier New", 7), fg=ACCENT2,
-                     bg=PANEL).pack(pady=(0, 8))
+            o_lbl.pack(pady=(10, 0))
+            tk.Label(card, text="HMS-OS", font=("Courier New", 10), fg=ACCENT2,
+                     bg=PANEL).pack(pady=(0, 12))
 
             self.hms_vals.append(h_lbl)
             self.hmsos_vals.append(o_lbl)
@@ -238,19 +245,18 @@ class App(tk.Tk):
         # Bar chart canvas
         chart_wrap = tk.Frame(right, bg=PANEL, highlightthickness=1,
                               highlightbackground=BORDER)
-        chart_wrap.pack(fill="both", expand=True, pady=(8, 0))
+        chart_wrap.pack(fill="both", expand=True, pady=(12, 0))
         tk.Label(chart_wrap, text="Runtime & Memory Comparison",
-                 font=("Courier New", 8, "bold"), fg=SUBTEXT, bg=PANEL).pack(pady=(8, 0))
+                 font=("Courier New", 11, "bold"), fg=SUBTEXT, bg=PANEL).pack(pady=(12, 0))
 
-        self.canvas = tk.Canvas(chart_wrap, bg=PANEL, bd=0,
-                                highlightthickness=0, height=220)
-        self.canvas.pack(fill="both", expand=True, padx=16, pady=(4, 12))
+        self.canvas = tk.Canvas(chart_wrap, bg=PANEL, bd=0, highlightthickness=0)
+        self.canvas.pack(fill="both", expand=True, padx=24, pady=(6, 16))
 
         # Winner banner
         self.winner_fr = tk.Frame(right, bg=BG)
-        self.winner_fr.pack(fill="x", pady=(8, 0))
+        self.winner_fr.pack(fill="x", pady=(12, 0))
         self.winner_lbl = tk.Label(self.winner_fr, text="",
-                                   font=("Courier New", 9, "bold"),
+                                   font=("Courier New", 13, "bold"),
                                    fg=SUCCESS, bg=BG)
         self.winner_lbl.pack()
 
@@ -374,8 +380,8 @@ class App(tk.Tk):
             y0 = ax_y_bot - bh
             self.canvas.create_rectangle(x0, y0, x1, ax_y_bot,
                                          fill=ACCENT1, outline="")
-            self.canvas.create_text((x0+x1)//2, y0 - 6,
-                                    text=f"{hv:.1f}", font=("Courier New", 7),
+            self.canvas.create_text((x0+x1)//2, y0 - 8,
+                                    text=f"{hv:.1f}", font=("Courier New", 10),
                                     fill=ACCENT1)
 
             # HMS-OS bar
@@ -385,24 +391,24 @@ class App(tk.Tk):
             y2 = ax_y_bot - bh2
             self.canvas.create_rectangle(x2, y2, x3, ax_y_bot,
                                          fill=ACCENT2, outline="")
-            self.canvas.create_text((x2+x3)//2, y2 - 6,
-                                    text=f"{ov:.1f}", font=("Courier New", 7),
+            self.canvas.create_text((x2+x3)//2, y2 - 8,
+                                    text=f"{ov:.1f}", font=("Courier New", 10),
                                     fill=ACCENT2)
 
             # Group label
-            self.canvas.create_text(cx, ax_y_bot + 14, text=label,
-                                    font=("Courier New", 8), fill=SUBTEXT)
+            self.canvas.create_text(cx, ax_y_bot + 18, text=label,
+                                    font=("Courier New", 11), fill=SUBTEXT)
 
         # Legend
-        lx = W - pad_r - 120
-        self.canvas.create_rectangle(lx, pad_t, lx+10, pad_t+10,
+        lx = W - pad_r - 140
+        self.canvas.create_rectangle(lx, pad_t, lx+12, pad_t+12,
                                      fill=ACCENT1, outline="")
-        self.canvas.create_text(lx+14, pad_t+5, text="HMS",
-                                anchor="w", font=("Courier New", 8), fill=ACCENT1)
-        self.canvas.create_rectangle(lx, pad_t+16, lx+10, pad_t+26,
+        self.canvas.create_text(lx+16, pad_t+6, text="HMS",
+                                anchor="w", font=("Courier New", 10), fill=ACCENT1)
+        self.canvas.create_rectangle(lx, pad_t+20, lx+12, pad_t+32,
                                      fill=ACCENT2, outline="")
-        self.canvas.create_text(lx+14, pad_t+21, text="HMS-OS",
-                                anchor="w", font=("Courier New", 8), fill=ACCENT2)
+        self.canvas.create_text(lx+16, pad_t+26, text="HMS-OS",
+                                anchor="w", font=("Courier New", 10), fill=ACCENT2)
 
 
 if __name__ == "__main__":
