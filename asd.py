@@ -152,9 +152,6 @@ class App(tk.Tk):
         tk.Label(title_fr, text="HMS vs HMS-OS", font=("Courier New", 28, "bold"),
                  fg=TEXT, bg=BG).pack(side="left")
 
-        tk.Label(self, text="Human Mental Search  ·  Dual Clustering Variant",
-                 font=("Courier New", 12), fg=SUBTEXT, bg=BG).pack(anchor="w", padx=44)
-
         sep = tk.Frame(self, bg=BORDER, height=1)
         sep.pack(fill="x", padx=40, pady=(14, 0))
 
