@@ -6,22 +6,28 @@ import time
 import threading
 
 # ─── Color Palette ────────────────────────────────────────────────────────────
-BG        = "#0f1117"
-PANEL     = "#1a1d27"
-ACCENT1   = "#4f8ef7"   # HMS  – blue
-ACCENT2   = "#f7764f"   # HMS-OS – orange
-TEXT      = "#e8eaf0"
-SUBTEXT   = "#7a7f9a"
-BORDER    = "#2a2d3e"
-SUCCESS   = "#4fbd7a"
-ENTRY_BG  = "#232637"
+BG          = "#0f1117"
+PANEL       = "#1a1d27"
+ACCENT1     = "#4f8ef7"   # HMS  – blue
+ACCENT2     = "#f7764f"   # HMS-OS – orange
+TEXT        = "#e8eaf0"
+SUBTEXT     = "#7a7f9a"
+BORDER      = "#2a2d3e"
+SUCCESS     = "#4fbd7a"
+ENTRY_BG    = "#232637"
 PROGRESS_BG = "#12151f"
+
+
+def fmt(v):
+    """Shared formatter used for BOTH cards and chart labels."""
+    if abs(v) >= 1e6:  return f"{v:.2e}"
+    if abs(v) >= 1000: return f"{v:,.0f}"
+    return f"{v:.4f}"          # 4 dp keeps small memory values distinct
+
 
 # ─── Simulated Algorithm Runners (with callback) ──────────────────────────────
 
 def run_hms(N, D, T, K, progress_cb=None):
-    """Simulate HMS runtime & memory based on complexity O(T×N×K).
-    progress_cb(iteration, T, best_val, elapsed_ms) called each iteration."""
     t0 = time.time()
     ops = 0
     best_val = float("inf")
@@ -67,7 +73,6 @@ def run_hms(N, D, T, K, progress_cb=None):
 
 
 def run_hms_os(N, D, T, K1, K2, progress_cb=None):
-    """Simulate HMS-OS runtime & memory based on O(T×N×(K1+K2))."""
     t0 = time.time()
     ops = 0
     best_val = float("inf")
@@ -109,7 +114,7 @@ def run_hms_os(N, D, T, K1, K2, progress_cb=None):
 
         W = solutions[best_idx]
         best_cluster = min(range(K1), key=lambda k: len(cl1[k]) == 0 or
-                           sum(sum(s[d]**2 for d in range(D)) for s in cl1[k]) / max(len(cl1[k]),1))
+                           sum(sum(s[d]**2 for d in range(D)) for s in cl1[k]) / max(len(cl1[k]), 1))
         C = c1[best_cluster]
         for i in range(N):
             r1, r2 = random.random(), random.random()
@@ -143,12 +148,12 @@ class App(tk.Tk):
                 self.attributes("-fullscreen", True)
         self.resizable(True, True)
 
-        # Live tracking state
-        self._hms_live  = {"time": 0, "mem": 0, "best": float("inf"), "ops": 0, "iter": 0}
+        self._lock = threading.Lock()
+        self._hms_live   = {"time": 0, "mem": 0, "best": float("inf"), "ops": 0, "iter": 0}
         self._hmsos_live = {"time": 0, "mem": 0, "best": float("inf"), "ops": 0, "iter": 0}
+        self._hms_result   = None   # filled when HMS thread finishes
+        self._hmsos_result = None   # filled when HMS-OS thread finishes
         self._T = 100
-        self._N = 50
-        self._D = 50
 
         self._build_ui()
 
@@ -166,7 +171,7 @@ class App(tk.Tk):
         body = tk.Frame(self, bg=BG)
         body.pack(fill="both", expand=True, padx=40, pady=18)
 
-        # Left: parameters
+        # ── Left panel: parameters ─────────────────────────────────────────────
         left = tk.Frame(body, bg=PANEL, bd=0, relief="flat",
                         highlightthickness=1, highlightbackground=BORDER)
         left.pack(side="left", fill="y", ipadx=20, ipady=20, padx=(0, 16))
@@ -174,13 +179,12 @@ class App(tk.Tk):
         tk.Label(left, text="PARAMETERS", font=("Courier New", 12, "bold"),
                  fg=ACCENT1, bg=PANEL).grid(row=0, column=0, columnspan=3,
                                             sticky="w", padx=20, pady=(16, 12))
-
         params = [
-            ("Solutions  (N)", "50", "10–200"),
-            ("Dimensions (D)", "50", "10–200"),
+            ("Solutions  (N)", "50",  "10–200"),
+            ("Dimensions (D)", "50",  "10–200"),
             ("Iterations  (T)", "100", "10–500"),
             ("Clusters K / K₁", "3",  "2–10"),
-            ("Clusters    K₂", "3",  "2–10  (HMS-OS only)"),
+            ("Clusters    K₂",  "3",  "2–10  (HMS-OS only)"),
         ]
         self.entries = []
         for r, (lbl, default, hint) in enumerate(params, start=1):
@@ -208,12 +212,11 @@ class App(tk.Tk):
                                    fg=SUBTEXT, bg=PANEL)
         self.status_lbl.grid(row=len(params)+2, column=0, columnspan=3, padx=20)
 
-        # ── Progress section ──────────────────────────────────────────────────
+        # ── Progress bars ──────────────────────────────────────────────────────
         prog_frame = tk.Frame(left, bg=PANEL)
         prog_frame.grid(row=len(params)+3, column=0, columnspan=3,
                         padx=20, pady=(14, 4), sticky="ew")
 
-        # HMS progress
         tk.Label(prog_frame, text="HMS", font=("Courier New", 9, "bold"),
                  fg=ACCENT1, bg=PANEL, width=7, anchor="w").grid(row=0, column=0, sticky="w")
         self.hms_prog_bar = tk.Canvas(prog_frame, height=10, bg=PROGRESS_BG,
@@ -223,24 +226,25 @@ class App(tk.Tk):
                                      fg=ACCENT1, bg=PANEL, width=5)
         self.hms_prog_pct.grid(row=0, column=2, padx=(4, 0))
 
-        # HMS-OS progress
         tk.Label(prog_frame, text="HMS-OS", font=("Courier New", 9, "bold"),
-                 fg=ACCENT2, bg=PANEL, width=7, anchor="w").grid(row=1, column=0, sticky="w", pady=(6,0))
+                 fg=ACCENT2, bg=PANEL, width=7, anchor="w").grid(row=1, column=0, sticky="w", pady=(6, 0))
         self.hmsos_prog_bar = tk.Canvas(prog_frame, height=10, bg=PROGRESS_BG,
                                         highlightthickness=0, relief="flat")
-        self.hmsos_prog_bar.grid(row=1, column=1, sticky="ew", padx=(4, 0), pady=(6,0))
+        self.hmsos_prog_bar.grid(row=1, column=1, sticky="ew", padx=(4, 0), pady=(6, 0))
         self.hmsos_prog_pct = tk.Label(prog_frame, text="0%", font=("Courier New", 9),
                                        fg=ACCENT2, bg=PANEL, width=5)
-        self.hmsos_prog_pct.grid(row=1, column=2, padx=(4, 0), pady=(6,0))
-
+        self.hmsos_prog_pct.grid(row=1, column=2, padx=(4, 0), pady=(6, 0))
         prog_frame.columnconfigure(1, weight=1)
 
-        # Live iter label
-        self.live_iter_lbl = tk.Label(left, text="", font=("Courier New", 9),
-                                      fg=SUBTEXT, bg=PANEL)
-        self.live_iter_lbl.grid(row=len(params)+4, column=0, columnspan=3, padx=20, pady=(2, 0))
+        # Live status labels (one per algo, stacked)
+        self.hms_iter_lbl = tk.Label(left, text="", font=("Courier New", 9),
+                                     fg=ACCENT1, bg=PANEL)
+        self.hms_iter_lbl.grid(row=len(params)+4, column=0, columnspan=3, padx=20, pady=(4, 0))
+        self.hmsos_iter_lbl = tk.Label(left, text="", font=("Courier New", 9),
+                                       fg=ACCENT2, bg=PANEL)
+        self.hmsos_iter_lbl.grid(row=len(params)+5, column=0, columnspan=3, padx=20, pady=(2, 0))
 
-        # Right: results
+        # ── Right panel: results ───────────────────────────────────────────────
         right = tk.Frame(body, bg=BG)
         right.pack(side="left", fill="both", expand=True)
 
@@ -276,13 +280,12 @@ class App(tk.Tk):
             self.hms_vals.append(h_lbl)
             self.hmsos_vals.append(o_lbl)
 
-        # Bar chart canvas
+        # Bar chart
         chart_wrap = tk.Frame(right, bg=PANEL, highlightthickness=1,
                               highlightbackground=BORDER)
         chart_wrap.pack(fill="both", expand=True, pady=(12, 0))
         tk.Label(chart_wrap, text="Runtime & Memory Comparison",
                  font=("Courier New", 11, "bold"), fg=SUBTEXT, bg=PANEL).pack(pady=(12, 0))
-
         self.canvas = tk.Canvas(chart_wrap, bg=PANEL, bd=0, highlightthickness=0)
         self.canvas.pack(fill="both", expand=True, padx=24, pady=(6, 16))
 
@@ -301,56 +304,46 @@ class App(tk.Tk):
         w = canvas.winfo_width() or 160
         h = canvas.winfo_height() or 10
         canvas.delete("all")
-        # Background track
         canvas.create_rectangle(0, 0, w, h, fill=PROGRESS_BG, outline="")
-        # Fill
         fill_w = int(w * pct)
         if fill_w > 0:
-            # Rounded-ish ends via small overlap
             canvas.create_rectangle(0, 0, fill_w, h, fill=color, outline="")
-        # Shine strip
-        shine_h = max(1, h // 3)
-        if fill_w > 2:
+            shine_h = max(1, h // 3)
             canvas.create_rectangle(0, 0, fill_w, shine_h,
                                     fill=self._lighten(color), outline="")
         pct_label.config(text=f"{int(pct*100)}%")
 
     def _lighten(self, hex_color):
-        """Return a lighter shade of a hex color for shine effect."""
         try:
-            r = int(hex_color[1:3], 16)
-            g = int(hex_color[3:5], 16)
-            b = int(hex_color[5:7], 16)
-            r = min(255, r + 40)
-            g = min(255, g + 40)
-            b = min(255, b + 40)
+            r = min(255, int(hex_color[1:3], 16) + 40)
+            g = min(255, int(hex_color[3:5], 16) + 40)
+            b = min(255, int(hex_color[5:7], 16) + 40)
             return f"#{r:02x}{g:02x}{b:02x}"
         except Exception:
             return hex_color
 
-    # ── Run Logic ──────────────────────────────────────────────────────────────
+    # ── Run logic (parallel threads) ───────────────────────────────────────────
 
     def _start_run(self):
         self.run_btn.config(state="disabled", text="running…")
         self.status_lbl.config(text="")
         self.winner_lbl.config(text="")
         self.canvas.delete("all")
-        self.live_iter_lbl.config(text="")
+        self.hms_iter_lbl.config(text="")
+        self.hmsos_iter_lbl.config(text="")
 
         for lbl in self.hms_vals + self.hmsos_vals:
             lbl.config(text="…", fg=SUBTEXT)
 
-        # Reset progress bars
         self._draw_progress(self.hms_prog_bar,   self.hms_prog_pct,   0, ACCENT1)
         self._draw_progress(self.hmsos_prog_bar, self.hmsos_prog_pct, 0, ACCENT2)
 
-        # Reset live state
-        self._hms_live   = {"time": 0, "mem": 0, "best": float("inf"), "ops": 0, "iter": 0}
-        self._hmsos_live = {"time": 0, "mem": 0, "best": float("inf"), "ops": 0, "iter": 0}
+        with self._lock:
+            self._hms_live   = {"time": 0, "mem": 0, "best": float("inf"), "ops": 0, "iter": 0}
+            self._hmsos_live = {"time": 0, "mem": 0, "best": float("inf"), "ops": 0, "iter": 0}
+            self._hms_result   = None
+            self._hmsos_result = None
 
-        threading.Thread(target=self._run_algorithms, daemon=True).start()
-
-    def _run_algorithms(self):
         try:
             N  = int(self.entries[0].get())
             D  = int(self.entries[1].get())
@@ -358,77 +351,89 @@ class App(tk.Tk):
             K  = int(self.entries[3].get())
             K2 = int(self.entries[4].get())
         except ValueError:
-            self.after(0, lambda: self._show_error("Invalid input — use integers only."))
+            self._show_error("Invalid input — use integers only.")
             return
 
         self._T = T
-        self._N = N
-        self._D = D
+        self._pending = 2   # countdown: both threads must finish
 
-        # ── HMS run ──────────────────────────────────────────────────────────
-        self.after(0, lambda: self.live_iter_lbl.config(text="● Running HMS…", fg=ACCENT1))
+        threading.Thread(target=self._thread_hms,   args=(N, D, T, K),     daemon=True).start()
+        threading.Thread(target=self._thread_hmsos, args=(N, D, T, K, K2), daemon=True).start()
 
-        def hms_cb(it, total, best, elapsed, ops):
+    # ── Worker threads ─────────────────────────────────────────────────────────
+
+    def _thread_hms(self, N, D, T, K):
+        def cb(it, total, best, elapsed, ops):
             snap = {"time": elapsed, "mem": N*D*8/(1024**2),
                     "best": best, "ops": ops, "iter": it}
-            self._hms_live = snap
+            with self._lock:
+                self._hms_live = snap
             pct = it / total
-            self.after(0, lambda p=pct, s=snap: self._live_update_hms(p, s, it, total))
+            self.after(0, lambda p=pct, s=snap, i=it, tot=total:
+                       self._live_update_hms(p, s, i, tot))
 
         try:
-            h_time, h_mem, h_best, h_ops = run_hms(N, D, T, K, progress_cb=hms_cb)
+            result = run_hms(N, D, T, K, progress_cb=cb)
         except Exception as ex:
             self.after(0, lambda: self._show_error(str(ex)))
             return
 
-        # ── HMS-OS run ────────────────────────────────────────────────────────
-        self.after(0, lambda: self.live_iter_lbl.config(text="● Running HMS-OS…", fg=ACCENT2))
+        with self._lock:
+            self._hms_result = result
+        self.after(0, self._check_both_done)
 
-        def hmsos_cb(it, total, best, elapsed, ops):
+    def _thread_hmsos(self, N, D, T, K1, K2):
+        def cb(it, total, best, elapsed, ops):
             snap = {"time": elapsed, "mem": N*D*8/(1024**2)*1.12,
                     "best": best, "ops": ops, "iter": it}
-            self._hmsos_live = snap
+            with self._lock:
+                self._hmsos_live = snap
             pct = it / total
-            self.after(0, lambda p=pct, s=snap: self._live_update_hmsos(p, s, it, total))
+            self.after(0, lambda p=pct, s=snap, i=it, tot=total:
+                       self._live_update_hmsos(p, s, i, tot))
 
         try:
-            o_time, o_mem, o_best, o_ops = run_hms_os(N, D, T, K, K2, progress_cb=hmsos_cb)
+            result = run_hms_os(N, D, T, K1, K2, progress_cb=cb)
         except Exception as ex:
             self.after(0, lambda: self._show_error(str(ex)))
             return
 
-        self.after(0, lambda: self._update_ui(
-            h_time, h_mem, h_best, h_ops,
-            o_time, o_mem, o_best, o_ops))
+        with self._lock:
+            self._hmsos_result = result
+        self.after(0, self._check_both_done)
+
+    def _check_both_done(self):
+        with self._lock:
+            h = self._hms_result
+            o = self._hmsos_result
+        if h is not None and o is not None:
+            self._draw_progress(self.hms_prog_bar,   self.hms_prog_pct,   1.0, ACCENT1)
+            self._draw_progress(self.hmsos_prog_bar, self.hmsos_prog_pct, 1.0, ACCENT2)
+            self._update_ui(*h, *o)
 
     # ── Live update helpers ────────────────────────────────────────────────────
 
     def _live_update_hms(self, pct, snap, it, total):
         self._draw_progress(self.hms_prog_bar, self.hms_prog_pct, pct, ACCENT1)
-        self.live_iter_lbl.config(
-            text=f"HMS  iter {it}/{total}  |  best={snap['best']:.4f}", fg=ACCENT1)
-        self._refresh_card_live(
-            snap["time"], snap["mem"], snap["best"], snap["ops"],
-            self.hms_vals, ACCENT1)
-        # Update chart with current live data
-        o = self._hmsos_live
+        self.hms_iter_lbl.config(
+            text=f"HMS  iter {it}/{total}  best={snap['best']:.4f}")
+        self._refresh_card_live(snap["time"], snap["mem"], snap["best"], snap["ops"],
+                                self.hms_vals, ACCENT1)
+        with self._lock:
+            o = dict(self._hmsos_live)
         self._draw_bars(snap["time"], o["time"], snap["mem"], o["mem"])
 
     def _live_update_hmsos(self, pct, snap, it, total):
         self._draw_progress(self.hmsos_prog_bar, self.hmsos_prog_pct, pct, ACCENT2)
-        self.live_iter_lbl.config(
-            text=f"HMS-OS  iter {it}/{total}  |  best={snap['best']:.4f}", fg=ACCENT2)
-        self._refresh_card_live(
-            snap["time"], snap["mem"], snap["best"], snap["ops"],
-            self.hmsos_vals, ACCENT2)
-        h = self._hms_live
+        self.hmsos_iter_lbl.config(
+            text=f"HMS-OS  iter {it}/{total}  best={snap['best']:.4f}")
+        self._refresh_card_live(snap["time"], snap["mem"], snap["best"], snap["ops"],
+                                self.hmsos_vals, ACCENT2)
+        with self._lock:
+            h = dict(self._hms_live)
         self._draw_bars(h["time"], snap["time"], h["mem"], snap["mem"])
 
     def _refresh_card_live(self, t, mem, best, ops, labels, color):
-        def fmt(v):
-            if abs(v) >= 1e6:  return f"{v:.2e}"
-            if abs(v) >= 1000: return f"{v:,.0f}"
-            return f"{v:.2f}"
         vals = [t, mem, best, ops]
         for i, lbl in enumerate(labels):
             lbl.config(text=fmt(vals[i]), fg=color)
@@ -441,11 +446,6 @@ class App(tk.Tk):
 
     def _update_ui(self, h_time, h_mem, h_best, h_ops,
                          o_time, o_mem, o_best, o_ops):
-        def fmt(v):
-            if abs(v) >= 1e6:  return f"{v:.2e}"
-            if abs(v) >= 1000: return f"{v:,.0f}"
-            return f"{v:.2f}"
-
         vals_h = [h_time, h_mem, h_best, h_ops]
         vals_o = [o_time, o_mem, o_best, o_ops]
 
@@ -464,26 +464,20 @@ class App(tk.Tk):
                 self.hms_vals[i].config(fg=ACCENT1)
                 self.hmsos_vals[i].config(fg=ACCENT2)
 
-        # Ensure both bars show 100%
-        self._draw_progress(self.hms_prog_bar,   self.hms_prog_pct,   1.0, ACCENT1)
-        self._draw_progress(self.hmsos_prog_bar, self.hmsos_prog_pct, 1.0, ACCENT2)
-
         self._draw_bars(h_time, o_time, h_mem, o_mem)
 
         hms_wins = sum(1 for h, o in zip(vals_h, vals_o) if h < o)
         os_wins  = sum(1 for h, o in zip(vals_h, vals_o) if o < h)
         if os_wins > hms_wins:
-            msg = "✦  HMS-OS outperforms HMS overall"
-            clr = ACCENT2
+            msg, clr = "✦  HMS-OS outperforms HMS overall", ACCENT2
         elif hms_wins > os_wins:
-            msg = "✦  HMS outperforms HMS-OS overall"
-            clr = ACCENT1
+            msg, clr = "✦  HMS outperforms HMS-OS overall", ACCENT1
         else:
-            msg = "✦  Both algorithms tied"
-            clr = SUCCESS
-        self.winner_lbl.config(text=msg, fg=clr)
-        self.live_iter_lbl.config(text="✔  Complete", fg=SUCCESS)
+            msg, clr = "✦  Both algorithms tied", SUCCESS
 
+        self.winner_lbl.config(text=msg, fg=clr)
+        self.hms_iter_lbl.config(text="✔  HMS complete",   fg=SUCCESS)
+        self.hmsos_iter_lbl.config(text="✔  HMS-OS complete", fg=SUCCESS)
         self.run_btn.config(state="normal", text="▶  RUN")
         self.status_lbl.config(text="")
 
@@ -498,18 +492,15 @@ class App(tk.Tk):
         plot_h = H - pad_t - pad_b
 
         groups = [
-            ("Time (ms)", h_time, o_time),
-            ("Memory (MB)", h_mem, o_mem),
+            ("Time (ms)",    h_time, o_time),
+            ("Memory (MB)",  h_mem,  o_mem),
         ]
-        n_groups = len(groups)
-        group_w  = plot_w / n_groups
-        bar_w    = group_w * 0.25
+        group_w = plot_w / len(groups)
+        bar_w   = group_w * 0.25
 
-        ax_x = pad_l;  ax_y_top = pad_t;  ax_y_bot = H - pad_b
-        self.canvas.create_line(ax_x, ax_y_top, ax_x, ax_y_bot,
-                                fill=BORDER, width=1)
-        self.canvas.create_line(ax_x, ax_y_bot, W - pad_r, ax_y_bot,
-                                fill=BORDER, width=1)
+        ax_x = pad_l; ax_y_top = pad_t; ax_y_bot = H - pad_b
+        self.canvas.create_line(ax_x, ax_y_top, ax_x, ax_y_bot, fill=BORDER, width=1)
+        self.canvas.create_line(ax_x, ax_y_bot, W - pad_r, ax_y_bot, fill=BORDER, width=1)
 
         for g, (label, hv, ov) in enumerate(groups):
             max_v = max(hv, ov, 1e-9)
@@ -517,46 +508,33 @@ class App(tk.Tk):
 
             # HMS bar
             bh = (hv / max_v) * plot_h
-            x0 = cx - bar_w - 4
-            x1 = cx - 4
+            x0, x1 = cx - bar_w - 4, cx - 4
             y0 = ax_y_bot - bh
-            self.canvas.create_rectangle(x0, y0, x1, ax_y_bot,
-                                         fill=ACCENT1, outline="")
+            self.canvas.create_rectangle(x0, y0, x1, ax_y_bot, fill=ACCENT1, outline="")
             self.canvas.create_text((x0+x1)//2, y0 - 8,
-                                    text=f"{hv:.1f}", font=("Courier New", 10),
-                                    fill=ACCENT1)
+                                    text=fmt(hv), font=("Courier New", 10), fill=ACCENT1)
 
             # HMS-OS bar
             bh2 = (ov / max_v) * plot_h
-            x2 = cx + 4
-            x3 = cx + bar_w + 4
+            x2, x3 = cx + 4, cx + bar_w + 4
             y2 = ax_y_bot - bh2
-            self.canvas.create_rectangle(x2, y2, x3, ax_y_bot,
-                                         fill=ACCENT2, outline="")
+            self.canvas.create_rectangle(x2, y2, x3, ax_y_bot, fill=ACCENT2, outline="")
             self.canvas.create_text((x2+x3)//2, y2 - 8,
-                                    text=f"{ov:.1f}", font=("Courier New", 10),
-                                    fill=ACCENT2)
+                                    text=fmt(ov), font=("Courier New", 10), fill=ACCENT2)
 
-            # Group label
             self.canvas.create_text(cx, ax_y_bot + 18, text=label,
                                     font=("Courier New", 11), fill=SUBTEXT)
 
         # Legend
         legend_y = H - 12
         center_x = W / 2
-
-        self.canvas.create_rectangle(
-            center_x - 90, legend_y - 6,
-            center_x - 78, legend_y + 6,
-            fill=ACCENT1, outline="")
-        self.canvas.create_text(center_x - 72, legend_y, text="HMS",
+        self.canvas.create_rectangle(center_x-90, legend_y-6, center_x-78, legend_y+6,
+                                     fill=ACCENT1, outline="")
+        self.canvas.create_text(center_x-72, legend_y, text="HMS",
                                 anchor="w", font=("Courier New", 10), fill=ACCENT1)
-
-        self.canvas.create_rectangle(
-            center_x + 10, legend_y - 6,
-            center_x + 22, legend_y + 6,
-            fill=ACCENT2, outline="")
-        self.canvas.create_text(center_x + 28, legend_y, text="HMS-OS",
+        self.canvas.create_rectangle(center_x+10, legend_y-6, center_x+22, legend_y+6,
+                                     fill=ACCENT2, outline="")
+        self.canvas.create_text(center_x+28, legend_y, text="HMS-OS",
                                 anchor="w", font=("Courier New", 10), fill=ACCENT2)
 
 
