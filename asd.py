@@ -288,6 +288,9 @@ class App(tk.Tk):
                  font=("Courier New", 11, "bold"), fg=SUBTEXT, bg=PANEL).pack(pady=(12, 0))
         self.canvas = tk.Canvas(chart_wrap, bg=PANEL, bd=0, highlightthickness=0)
         self.canvas.pack(fill="both", expand=True, padx=24, pady=(6, 16))
+        self._chart_items = None   # created lazily on first draw
+        self._chart_size  = (0, 0) # last known (W, H) — rebuild if resized
+        self.canvas.bind("<Configure>", self._on_canvas_resize)
 
         # Winner banner
         self.winner_fr = tk.Frame(right, bg=BG)
@@ -297,20 +300,28 @@ class App(tk.Tk):
                                    fg=SUCCESS, bg=BG)
         self.winner_lbl.pack()
 
-    # ── Progress bar drawing ───────────────────────────────────────────────────
+    # ── Progress bar drawing (flicker-free) ───────────────────────────────────
 
     def _draw_progress(self, canvas, pct_label, pct, color):
         canvas.update_idletasks()
         w = canvas.winfo_width() or 160
         h = canvas.winfo_height() or 10
-        canvas.delete("all")
-        canvas.create_rectangle(0, 0, w, h, fill=PROGRESS_BG, outline="")
-        fill_w = int(w * pct)
-        if fill_w > 0:
-            canvas.create_rectangle(0, 0, fill_w, h, fill=color, outline="")
-            shine_h = max(1, h // 3)
-            canvas.create_rectangle(0, 0, fill_w, shine_h,
-                                    fill=self._lighten(color), outline="")
+        fill_w = max(0, int(w * pct))
+        shine_h = max(1, h // 3)
+        light = self._lighten(color)
+
+        if not getattr(canvas, "_pb_items", None):
+            bg_id    = canvas.create_rectangle(0, 0, w, h, fill=PROGRESS_BG, outline="")
+            fill_id  = canvas.create_rectangle(0, 0, 0, h, fill=color, outline="")
+            shine_id = canvas.create_rectangle(0, 0, 0, shine_h, fill=light, outline="")
+            canvas._pb_items = (bg_id, fill_id, shine_id)
+
+        bg_id, fill_id, shine_id = canvas._pb_items
+        canvas.coords(bg_id,    0, 0, w, h)
+        canvas.coords(fill_id,  0, 0, fill_w, h)
+        canvas.coords(shine_id, 0, 0, fill_w, shine_h)
+        canvas.itemconfig(fill_id,  fill=color)
+        canvas.itemconfig(shine_id, fill=light)
         pct_label.config(text=f"{int(pct*100)}%")
 
     def _lighten(self, hex_color):
@@ -329,6 +340,7 @@ class App(tk.Tk):
         self.status_lbl.config(text="")
         self.winner_lbl.config(text="")
         self.canvas.delete("all")
+        self._chart_items = None   # force recreate on next draw
         self.hms_iter_lbl.config(text="")
         self.hmsos_iter_lbl.config(text="")
 
@@ -337,6 +349,9 @@ class App(tk.Tk):
 
         self._draw_progress(self.hms_prog_bar,   self.hms_prog_pct,   0, ACCENT1)
         self._draw_progress(self.hmsos_prog_bar, self.hmsos_prog_pct, 0, ACCENT2)
+        # Reset pb item caches so they're recreated cleanly
+        self.hms_prog_bar._pb_items   = None
+        self.hmsos_prog_bar._pb_items = None
 
         with self._lock:
             self._hms_live   = {"time": 0, "mem": 0, "best": float("inf"), "ops": 0, "iter": 0}
@@ -481,8 +496,64 @@ class App(tk.Tk):
         self.run_btn.config(state="normal", text="▶  RUN")
         self.status_lbl.config(text="")
 
+    def _on_canvas_resize(self, event):
+        """Rebuild static items when the canvas is resized."""
+        new_size = (event.width, event.height)
+        if new_size != self._chart_size:
+            self._chart_items = None   # force recreate
+            self._chart_size  = new_size
+            # Redraw with last known values if available
+            if self._hms_live["time"] or self._hmsos_live["time"]:
+                h = self._hms_live
+                o = self._hmsos_live
+                self._draw_bars(h["time"], o["time"], h["mem"], o["mem"])
+
+    def _init_chart_items(self, W, H, group_w, bar_w, pad_l, pad_r, pad_t, pad_b):
+        """Create all canvas items once. Returns dict of item IDs."""
+        c = self.canvas
+        ax_y_bot = H - pad_b
+        ax_y_top = pad_t
+
+        items = {}
+        # Axes
+        items["ax_v"] = c.create_line(pad_l, ax_y_top, pad_l, ax_y_bot,
+                                       fill=BORDER, width=1)
+        items["ax_h"] = c.create_line(pad_l, ax_y_bot, W - pad_r, ax_y_bot,
+                                       fill=BORDER, width=1)
+
+        group_labels = ["Time (ms)", "Memory (MB)"]
+        for g in range(2):
+            cx = pad_l + g * group_w + group_w / 2
+            pfx = f"g{g}"
+
+            # HMS bar + label
+            items[f"{pfx}_hbar"] = c.create_rectangle(0, 0, 0, 0, fill=ACCENT1, outline="")
+            items[f"{pfx}_htxt"] = c.create_text(0, 0, text="", font=("Courier New", 10),
+                                                  fill=ACCENT1, anchor="s")
+            # HMS-OS bar + label
+            items[f"{pfx}_obar"] = c.create_rectangle(0, 0, 0, 0, fill=ACCENT2, outline="")
+            items[f"{pfx}_otxt"] = c.create_text(0, 0, text="", font=("Courier New", 10),
+                                                  fill=ACCENT2, anchor="s")
+            # Group label
+            items[f"{pfx}_lbl"] = c.create_text(cx, ax_y_bot + 18, text=group_labels[g],
+                                                  font=("Courier New", 11), fill=SUBTEXT)
+
+        # Legend
+        legend_y = H - 12
+        center_x = W / 2
+        items["leg_h_rect"] = c.create_rectangle(center_x-90, legend_y-6,
+                                                   center_x-78, legend_y+6,
+                                                   fill=ACCENT1, outline="")
+        items["leg_h_txt"]  = c.create_text(center_x-72, legend_y, text="HMS",
+                                             anchor="w", font=("Courier New", 10), fill=ACCENT1)
+        items["leg_o_rect"] = c.create_rectangle(center_x+10, legend_y-6,
+                                                   center_x+22, legend_y+6,
+                                                   fill=ACCENT2, outline="")
+        items["leg_o_txt"]  = c.create_text(center_x+28, legend_y, text="HMS-OS",
+                                             anchor="w", font=("Courier New", 10), fill=ACCENT2)
+        return items
+
     def _draw_bars(self, h_time, o_time, h_mem, o_mem):
-        self.canvas.delete("all")
         self.canvas.update_idletasks()
         W = self.canvas.winfo_width()  or 560
         H = self.canvas.winfo_height() or 200
@@ -490,52 +561,44 @@ class App(tk.Tk):
         pad_l, pad_r, pad_t, pad_b = 50, 20, 20, 60
         plot_w = W - pad_l - pad_r
         plot_h = H - pad_t - pad_b
-
-        groups = [
-            ("Time (ms)",    h_time, o_time),
-            ("Memory (MB)",  h_mem,  o_mem),
-        ]
-        group_w = plot_w / len(groups)
+        group_w = plot_w / 2
         bar_w   = group_w * 0.25
+        ax_y_bot = H - pad_b
 
-        ax_x = pad_l; ax_y_top = pad_t; ax_y_bot = H - pad_b
-        self.canvas.create_line(ax_x, ax_y_top, ax_x, ax_y_bot, fill=BORDER, width=1)
-        self.canvas.create_line(ax_x, ax_y_bot, W - pad_r, ax_y_bot, fill=BORDER, width=1)
+        # Create items on first call or after resize
+        if self._chart_items is None:
+            self._chart_items = self._init_chart_items(W, H, group_w, bar_w,
+                                                        pad_l, pad_r, pad_t, pad_b)
+            self._chart_size  = (W, H)
 
-        for g, (label, hv, ov) in enumerate(groups):
+        it = self._chart_items
+        c  = self.canvas
+
+        data = [
+            (h_time, o_time),
+            (h_mem,  o_mem),
+        ]
+
+        for g, (hv, ov) in enumerate(data):
+            pfx   = f"g{g}"
             max_v = max(hv, ov, 1e-9)
-            cx = pad_l + g * group_w + group_w / 2
+            cx    = pad_l + g * group_w + group_w / 2
 
             # HMS bar
             bh = (hv / max_v) * plot_h
             x0, x1 = cx - bar_w - 4, cx - 4
             y0 = ax_y_bot - bh
-            self.canvas.create_rectangle(x0, y0, x1, ax_y_bot, fill=ACCENT1, outline="")
-            self.canvas.create_text((x0+x1)//2, y0 - 8,
-                                    text=fmt(hv), font=("Courier New", 10), fill=ACCENT1)
+            c.coords(it[f"{pfx}_hbar"], x0, y0, x1, ax_y_bot)
+            c.coords(it[f"{pfx}_htxt"], (x0+x1)/2, y0 - 4)
+            c.itemconfig(it[f"{pfx}_htxt"], text=fmt(hv))
 
             # HMS-OS bar
             bh2 = (ov / max_v) * plot_h
             x2, x3 = cx + 4, cx + bar_w + 4
             y2 = ax_y_bot - bh2
-            self.canvas.create_rectangle(x2, y2, x3, ax_y_bot, fill=ACCENT2, outline="")
-            self.canvas.create_text((x2+x3)//2, y2 - 8,
-                                    text=fmt(ov), font=("Courier New", 10), fill=ACCENT2)
-
-            self.canvas.create_text(cx, ax_y_bot + 18, text=label,
-                                    font=("Courier New", 11), fill=SUBTEXT)
-
-        # Legend
-        legend_y = H - 12
-        center_x = W / 2
-        self.canvas.create_rectangle(center_x-90, legend_y-6, center_x-78, legend_y+6,
-                                     fill=ACCENT1, outline="")
-        self.canvas.create_text(center_x-72, legend_y, text="HMS",
-                                anchor="w", font=("Courier New", 10), fill=ACCENT1)
-        self.canvas.create_rectangle(center_x+10, legend_y-6, center_x+22, legend_y+6,
-                                     fill=ACCENT2, outline="")
-        self.canvas.create_text(center_x+28, legend_y, text="HMS-OS",
-                                anchor="w", font=("Courier New", 10), fill=ACCENT2)
+            c.coords(it[f"{pfx}_obar"], x2, y2, x3, ax_y_bot)
+            c.coords(it[f"{pfx}_otxt"], (x2+x3)/2, y2 - 4)
+            c.itemconfig(it[f"{pfx}_otxt"], text=fmt(ov))
 
 
 if __name__ == "__main__":
